@@ -12,32 +12,34 @@ from utils.data_loader import get_example_wardrobe, get_empty_wardrobe
 
 # ── query handler ─────────────────────────────────────────────────────────────
 
-def handle_query(user_query: str, wardrobe_choice: str) -> tuple[str, str, str]:
+def handle_query(user_query: str, wardrobe_choice: str) -> tuple[str, str, str, str]:
     """
     Called by Gradio when the user submits a query.
-    Returns (listing_text, outfit_suggestion, fit_card).
+    Returns (listing_text, price_verdict, outfit_suggestion, fit_card).
     """
-    # Step 1: Guard against empty query
     if not user_query or not user_query.strip():
-        return "Please enter a search query.", "", ""
+        return "Please enter a search query.", "", "", ""
 
-    # Step 2: Select wardrobe
     wardrobe = (
         get_example_wardrobe()
         if wardrobe_choice == "Example wardrobe"
         else get_empty_wardrobe()
     )
 
-    # Step 3: Run the agent
     session = run_agent(query=user_query.strip(), wardrobe=wardrobe)
 
-    # Step 4: Handle early-exit (error)
     if session["error"]:
-        return session["error"], "", ""
+        return session["error"], "", "", ""
 
-    # Step 5: Format the listing panel
     item = session["selected_item"]
+
+    # Build listing panel — prepend relaxed-search note if constraints were loosened
+    relaxed_note = ""
+    if session.get("search_relaxed_note"):
+        relaxed_note = f"⚠️  {session['search_relaxed_note']}\n\n"
+
     listing_text = (
+        f"{relaxed_note}"
         f"✅ {item['title']}\n\n"
         f"💰 ${item['price']:.2f}  •  📦 {item['platform'].capitalize()}\n"
         f"📏 Size: {item['size']}  •  Condition: {item['condition'].capitalize()}\n"
@@ -45,7 +47,9 @@ def handle_query(user_query: str, wardrobe_choice: str) -> tuple[str, str, str]:
         f"{item['description']}"
     )
 
-    return listing_text, session["outfit_suggestion"], session["fit_card"]
+    price_verdict = session.get("price_verdict") or ""
+
+    return listing_text, price_verdict, session["outfit_suggestion"], session["fit_card"]
 
 
 # ── interface ─────────────────────────────────────────────────────────────────
@@ -89,6 +93,13 @@ Describe what you're looking for — include size and price if you want to filte
                 lines=8,
                 interactive=False,
             )
+            price_output = gr.Textbox(
+                label="💲 Price verdict",
+                lines=4,
+                interactive=False,
+            )
+
+        with gr.Row():
             outfit_output = gr.Textbox(
                 label="👗 Outfit idea",
                 lines=8,
@@ -106,15 +117,17 @@ Describe what you're looking for — include size and price if you want to filte
             label="Try these queries",
         )
 
+        outputs = [listing_output, price_output, outfit_output, fitcard_output]
+
         submit_btn.click(
             fn=handle_query,
             inputs=[query_input, wardrobe_choice],
-            outputs=[listing_output, outfit_output, fitcard_output],
+            outputs=outputs,
         )
         query_input.submit(
             fn=handle_query,
             inputs=[query_input, wardrobe_choice],
-            outputs=[listing_output, outfit_output, fitcard_output],
+            outputs=outputs,
         )
 
     return demo

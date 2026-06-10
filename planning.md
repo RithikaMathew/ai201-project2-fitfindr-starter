@@ -1,4 +1,3 @@
-
 # FitFindr — planning.md
 
 ---
@@ -227,3 +226,85 @@ caption mentioning the item, price, and platform.
 agent sets error message naming the constraints, returns early. Panels 2 and 3 are blank.
 Panel 1 shows: "No listings found for 'designer ballgown' in size XXS under $5. Try
 broadening your search -- remove the size filter, raise the price limit, or use different keywords."
+
+---
+
+## Stretch Features Implemented
+
+### Stretch 1: Retry Logic with Fallback
+
+**What it does:**
+`search_listings_relaxed()` wraps `search_listings()` with a 4-attempt retry
+sequence. If the strict query returns nothing, it retries with progressively
+looser constraints:
+
+1. Strict: description + size + max_price
+2. Drop size filter → retry
+3. Drop price cap → retry (with original size if present)
+4. Drop both → retry with description only
+
+Each successful retry returns a `relaxed_note` string explaining what was loosened,
+which surfaces in the listing panel in the UI as a ⚠️ warning.
+
+**Agent changes:**
+`run_agent()` now calls `search_listings_relaxed()` instead of `search_listings()`
+directly. The returned note is stored in `session["search_relaxed_note"]` and
+passed through to `app.py`.
+
+**UI changes:**
+If `search_relaxed_note` is set, it prepends the listing panel text with the
+warning so users know their constraints were adjusted.
+
+---
+
+### Stretch 2: Price Comparison Tool (Tool 4)
+
+**What it does:**
+`price_comparison(item)` finds comparable listings in the dataset by computing
+keyword overlap on category + style_tags (≥2 keywords in common). It then
+compares the item's price to the mean of comparable prices and returns a
+verdict: "great deal 🟢", "fair price 🟡", or "on the pricier side 🔴".
+
+**Input parameters:**
+- `item` (dict): A full listing dict. Must have `id`, `price`, `category`, `style_tags`.
+
+**What it returns:**
+A human-readable multi-line string with: verdict label, price vs. average
+sentence, and a range + count of comparables. Returns a no-comparables message
+if the dataset has nothing similar. Never raises.
+
+**Agent changes:**
+Called in `run_agent()` between item selection and `suggest_outfit()`.
+Result stored in `session["price_verdict"]`.
+
+**UI changes:**
+A new "💲 Price verdict" panel was added to the Gradio layout, sitting between
+the listing panel and the outfit panels.
+
+---
+
+## Tool Call Visibility (Terminal Logging)
+
+Both `tools.py` and `agent.py` now emit color-coded terminal logs for every
+tool call and key decision:
+
+- `[AGENT]` lines (yellow) — parsing, item selection, flow decisions
+- `[TOOL]` lines (cyan) — every tool entry, its parameters, and its result count/status
+
+This makes the multi-step flow visible in the terminal during development:
+
+```
+[AGENT] run_agent started — query='vintage graphic tee under $30'
+[AGENT] parsed → description='vintage graphic tee', size=None, max_price=30.0
+[TOOL]  search_listings(description='vintage graphic tee', no size filter, max_price=$30)
+[TOOL]  search_listings → 3 result(s) found
+[TOOL]  search_listings_relaxed → (no retry needed)
+[AGENT] selected item → 'Faded Band Tee' ($22.0)
+[TOOL]  price_comparison(item='Faded Band Tee', price=$22.0)
+[TOOL]  price_comparison → great deal 🟢 (avg=$31.50, n=4)
+[TOOL]  suggest_outfit(item='Faded Band Tee', wardrobe_items=10)
+[TOOL]  suggest_outfit → response received
+[TOOL]  create_fit_card(item='Faded Band Tee')
+[TOOL]  create_fit_card → response received
+[AGENT] run_agent → completed successfully
+```
